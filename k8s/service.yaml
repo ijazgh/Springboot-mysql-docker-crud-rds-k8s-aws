@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: springboot-rds-crud
+  namespace: default
+  labels: {app: springboot-rds-crud}
+spec:
+  type: ClusterIP
+  selector: {app: springboot-rds-crud}
+  ports:
+    - port: 8080
+      targetPort: 8080

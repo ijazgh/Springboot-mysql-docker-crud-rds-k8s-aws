@@ -1,0 +1,88 @@
+name: Build and deploy RDS app
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy to existing EKS and existing RDS (billable resources must already exist)"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: rds-app-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: maven
+      - run: mvn -B verify
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-2
+      EKS_CLUSTER: springboot-crud-app-cluster
+      DB_HOST: ${{ vars.RDS_HOST }}
+      DB_NAME: javatechie
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${DB_HOST:?Set repository variable RDS_HOST}"
+          : "${DB_USERNAME:?Set secret DB_USERNAME}"
+          : "${DB_PASSWORD:?Set secret DB_PASSWORD}"
+          : "${DOCKER_USERNAME:?Set secret DOCKER_USERNAME}"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: maven
+      - run: mvn -B package -DskipTests
+      - run: python3 scripts/prepare-rds-truststore.py
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Publish immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$DOCKER_USERNAME/springboot-mysql-rds:${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.34.1
+      - name: Connect to existing EKS
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+      - name: Configure database connection and deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl create configmap rds-crud-config -n default --from-literal=DB_HOST="$DB_HOST" --from-literal=DB_NAME="$DB_NAME" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic rds-crud-db -n default --from-literal=DB_USERNAME="$DB_USERNAME" --from-literal=DB_PASSWORD="$DB_PASSWORD" --dry-run=client -o yaml | kubectl apply --server-side -f -
+          kubectl apply -f k8s/service.yaml
+          kubectl set image --local -f k8s/deployment.yaml app="$IMAGE" -o yaml | kubectl apply -f -
+          kubectl rollout status deployment/springboot-rds-crud -n default --timeout=300s

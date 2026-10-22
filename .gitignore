@@ -1,0 +1,11 @@
+target/
+.idea/
+*.iml
+.env
+.env.*
+!.env.example
+certs/*.p12
+certs/*.pem
+*.log
+*credentials*
+*secrets*.yaml

@@ -1,0 +1,16 @@
+# OPTIONAL: creates a BILLABLE internet-facing NLB. Default service is ClusterIP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: springboot-rds-crud
+  namespace: default
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+spec:
+  type: LoadBalancer
+  loadBalancerClass: service.k8s.aws/nlb
+  selector: {app: springboot-rds-crud}
+  ports:
+    - port: 8080
+      targetPort: 8080

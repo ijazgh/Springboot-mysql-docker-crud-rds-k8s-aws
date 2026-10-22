@@ -1,0 +1,24 @@
+# Temporary client for bootstrap only. Delete after use. No database password here.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rds-mysql-client
+  namespace: default
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  containers:
+    - name: client
+      image: mysql:8.4
+      command: ["sleep", "3600"]
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 250m, memory: 256Mi}
+      volumeMounts:
+        - name: ca
+          mountPath: /certs
+          readOnly: true
+  volumes:
+    - name: ca
+      configMap:
+        name: rds-client-ca

@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT:3306}/${DB_NAME:javatechie}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 30000
+      data-source-properties:
+        sslMode: VERIFY_IDENTITY
+        trustCertificateKeyStoreUrl: ${RDS_TRUSTSTORE_URL:file:/app/certs/rds-truststore.p12}
+        trustCertificateKeyStoreType: PKCS12
+        trustCertificateKeyStorePassword: changeit
+        fallbackToSystemTrustStore: false
