@@ -3,3 +3,7 @@ spring:
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:javatechie}?sslMode=DISABLED&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:springapp}
     password: ${DB_PASSWORD:local-learning-only}
+
+app:
+  login:
+    password: ${APP_LOGIN_PASSWORD:local-login-only}

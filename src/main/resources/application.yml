@@ -20,3 +20,8 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+app:
+  login:
+    username: ${APP_LOGIN_USERNAME:learner}
+    password: ${APP_LOGIN_PASSWORD}

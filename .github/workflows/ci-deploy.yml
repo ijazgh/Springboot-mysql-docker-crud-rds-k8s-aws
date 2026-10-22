@@ -38,12 +38,17 @@ jobs:
       DB_USERNAME: ${{ secrets.DB_USERNAME }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      APP_LOGIN_USERNAME: ${{ secrets.APP_LOGIN_USERNAME }}
+      APP_LOGIN_PASSWORD: ${{ secrets.APP_LOGIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - name: Check required configuration
         shell: bash
         run: |
           set -euo pipefail
+          : "${APP_LOGIN_USERNAME:?Set secret APP_LOGIN_USERNAME}"
+          : "${APP_LOGIN_PASSWORD:?Set secret APP_LOGIN_PASSWORD}"
+          if [ "${#APP_LOGIN_PASSWORD}" -lt 12 ]; then echo "Login password must have at least 12 characters"; exit 1; fi
           : "${DB_HOST:?Set repository variable RDS_HOST}"
           : "${DB_USERNAME:?Set secret DB_USERNAME}"
           : "${DB_PASSWORD:?Set secret DB_PASSWORD}"
@@ -83,6 +88,22 @@ jobs:
           set -euo pipefail
           kubectl create configmap rds-crud-config -n default --from-literal=DB_HOST="$DB_HOST" --from-literal=DB_NAME="$DB_NAME" --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic rds-crud-db -n default --from-literal=DB_USERNAME="$DB_USERNAME" --from-literal=DB_PASSWORD="$DB_PASSWORD" --dry-run=client -o yaml | kubectl apply --server-side -f -
-          kubectl apply -f k8s/service.yaml
-          kubectl set image --local -f k8s/deployment.yaml app="$IMAGE" -o yaml | kubectl apply -f -
+          kubectl create secret generic rds-crud-login -n default --from-literal=APP_LOGIN_USERNAME="$APP_LOGIN_USERNAME" --from-literal=APP_LOGIN_PASSWORD="$APP_LOGIN_PASSWORD" --dry-run=client -o yaml | kubectl apply --server-side -f -
+          # Selector targets ONLY new TLS-enabled pods, never the old HTTP pods.
+          kubectl apply -f k8s/service-public.yaml
+          for attempt in $(seq 1 60); do
+            PUBLIC_HOST=$(kubectl get service springboot-rds-crud -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$PUBLIC_HOST" ]; then break; fi
+            sleep 10
+          done
+          : "${PUBLIC_HOST:?Load balancer hostname was not assigned}"
+          TLS_KEYSTORE_PASSWORD=$(openssl rand -hex 24)
+          echo "::add-mask::$TLS_KEYSTORE_PASSWORD"
+          export TLS_KEYSTORE_PASSWORD
+          keytool -genkeypair -alias app -keyalg RSA -keysize 2048 -validity 7 -storetype PKCS12 -keystore "$RUNNER_TEMP/server.p12" -storepass:env TLS_KEYSTORE_PASSWORD -dname "CN=SpringBootLearning" -ext "SAN=dns:$PUBLIC_HOST" -noprompt
+          kubectl create secret generic rds-crud-tls -n default --from-file=server.p12="$RUNNER_TEMP/server.p12" --from-literal=TLS_KEYSTORE_PASSWORD="$TLS_KEYSTORE_PASSWORD" --dry-run=client -o yaml | kubectl apply --server-side -f -
+          rm -f "$RUNNER_TEMP/server.p12"
+          echo "Public learning URL: https://$PUBLIC_HOST/orders (self-signed certificate)"
+          kubectl set image --local -f k8s/deployment-public.yaml app="$IMAGE" -o yaml | kubectl apply -f -
+          kubectl rollout restart deployment/springboot-rds-crud -n default
           kubectl rollout status deployment/springboot-rds-crud -n default --timeout=300s

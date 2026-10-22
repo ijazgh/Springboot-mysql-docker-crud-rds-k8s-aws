@@ -1,16 +1,21 @@
-# OPTIONAL: creates a BILLABLE internet-facing NLB. Default service is ClusterIP.
+# Public HTTPS learning endpoint. Self-signed certificate: browser warning expected.
 apiVersion: v1
 kind: Service
 metadata:
   name: springboot-rds-crud
   namespace: default
+  labels: {app: springboot-rds-crud}
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: TCP
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: traffic-port
 spec:
   type: LoadBalancer
   loadBalancerClass: service.k8s.aws/nlb
-  selector: {app: springboot-rds-crud}
+  selector: {app: springboot-rds-crud, public-access: tls}
   ports:
-    - port: 8080
-      targetPort: 8080
+    - name: https
+      port: 443
+      targetPort: 8443
+      protocol: TCP

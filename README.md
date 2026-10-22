@@ -1,62 +1,40 @@
-# Spring Boot + MySQL on RDS + Docker + EKS
+# Spring Boot + private RDS + public HTTPS login on EKS
 
-This is a separate learning project based on your working `springboot-crud-k8s` application. The Java order controller, entity, repository and service are reused. MySQL moves to Amazon RDS; Kubernetes runs only the Spring Boot app. No AWS resources are created by building or pushing this repository.
+This learning application exposes its order API through a public AWS Network Load Balancer using HTTPS and Spring Security login. RDS remains private. See [PUBLIC-LOGIN-SETUP.md](PUBLIC-LOGIN-SETUP.md) for the CURRENT deployment and login instructions.
 
-**Start with [the complete walkthrough](docs/STEP-BY-STEP.md).** Open this directory's `pom.xml` in IntelliJ and select **Corretto 26** as the project and Maven SDK. Java 26 matches your existing project; this is not an LTS version. Plan supported Java/framework upgrades for a long-lived application.
+The original [RDS walkthrough](docs/STEP-BY-STEP.md) still explains the VPC, database and repository setup. Its private-Service deployment and anonymous API examples describe the earlier version and are superseded by the public-login guide.
 
-```mermaid
-flowchart LR
-  Developer[Developer] --> GitHub[GitHub Actions: test]
-  GitHub -->|manual deployment only| Docker[Docker Hub image]
-  Docker --> EKS[EKS: Spring Boot pod]
-  Browser[Browser through local port-forward] --> EKS
-  EKS -->|TLS verified: MySQL port 3306| RDS[Private Amazon RDS MySQL]
-```
+## Local development
 
-## Run without AWS
-
-Install Java 26, Maven and Docker Desktop; start Docker Desktop's Linux engine. In this directory:
+Use Java 26 and Maven. Start the local MySQL database with Docker Compose, then run the app with the local profile. If another MySQL uses 3306, use the existing local test database on 3307 and set `DB_PORT=3307` in IntelliJ. The local default login is `learner` / `local-login-only`; open `http://localhost:8080/login`. Override `APP_LOGIN_USERNAME` / `APP_LOGIN_PASSWORD` if desired. Never use these public local-learning credentials for an AWS deployment.
 
 ```powershell
-docker compose up -d --wait
 mvn verify
 mvn spring-boot:run
 ```
 
-In a second terminal:
+`mvn verify` uses H2 and generates a short-lived test certificate; it does not create AWS infrastructure. Tests cover authentication, login/logout, CSRF, order persistence, health checks and HTTPS with a trusted test certificate.
 
-```powershell
-$order = @{name='Watch'; qty=2; price=1499} | ConvertTo-Json
-Invoke-RestMethod http://localhost:8080/orders -Method Post -ContentType 'application/json' -Body $order
-Invoke-RestMethod http://localhost:8080/orders
-```
+## GitHub configuration
 
-Stop the app with Ctrl+C and local MySQL with `docker compose down`. The named local volume retains your learning records. `docker compose down -v` permanently removes those LOCAL records.
+Keep `RDS_HOST` as a repository variable. Keep AWS, Docker Hub, DB_USERNAME and DB_PASSWORD secrets. Add APP_LOGIN_USERNAME and APP_LOGIN_PASSWORD as repository Actions secrets, with a distinct login password of at least 12 characters.
 
-To build the deployable Docker image yourself (Python 3 and JDK keytool must be on PATH):
+Main pushes and PRs run tests only. Run the workflow manually with **deploy** checked to publish an image and update the EXISTING EKS cluster. The workflow creates the public NLB Service, generates a seven-day self-signed certificate for its hostname, and deploys profiles `rds,public`. The NLB selector matches only the new TLS pods. The login and certificate are kept in Kubernetes Secrets.
 
-```powershell
-mvn verify
-python scripts/prepare-rds-truststore.py
-docker build -t springboot-mysql-rds:local .
-```
+## Public access
 
-Do not run the container with its default local profile unless you configure a reachable MySQL host; inside a container, `localhost` refers to that container. The Kubernetes manifest explicitly selects the RDS profile and supplies its settings.
+Open `https://YOUR_NLB_HOSTNAME/orders`; no port-forwarding is needed after deployment. Expect a browser certificate warning because you selected temporary self-signed HTTPS without a domain. Only trust the hostname verified from your own Service. A trusted production certificate requires an appropriate domain/CA setup. Redeployment regenerates the temporary certificate; this is not an automatically renewed permanent website.
 
-## What is included
+The app has one in-memory learning user and no registration/password-reset system. Order reads require authentication. Order writes also require CSRF protection; see the public-login guide for API details. The generated browser login page redirects successful login to the orders JSON. RDS credentials and login credentials are separate.
 
-* Original API: POST `/orders`, GET `/orders`, GET `/orders/{id}`. The original app has create/read operations; update/delete endpoints have not been invented here.
-* Local MySQL Compose setup and isolated H2 automated tests; no AWS account needed for tests.
-* RDS profile with certificate and hostname verification, bounded connection pool and required external credentials.
-* Non-root Docker image and Kubernetes health checks. Readiness checks the database; liveness checks the application process.
-* One learning replica and a free-of-load-balancer **ClusterIP** service. An optional public NLB manifest is separate and billable.
-* GitHub workflow: automatic tests, explicit manual AWS deployment, immutable commit-tagged images.
-* Database bootstrap SQL template; network, GitHub, troubleshooting, reuse and cleanup instructions.
+## Kubernetes files
 
-## Important boundaries
+* `deployment-public.yaml` + `service-public.yaml`: CURRENT public HTTPS deployment. Port 443 forwards encrypted TCP to app port 8443; health checks run separately on internal port 8081.
+* `deployment.yaml` + `service.yaml`: alternative PRIVATE authenticated HTTP deployment for port-forwarding. Requires the login Secret as well. Do not apply this pair over the public service without planning the switch and verifying NLB cleanup.
+* `mysql-client.yaml`: temporary database setup tool; delete after use.
 
-RDS itself is not created yet. Nothing was deployed or deleted in your existing AWS account. This project does not import the old database records automatically. GitHub secrets must be entered in the new repository; existing repository secrets cannot be read back or transferred by this project.
+Do not apply the whole k8s directory because it contains alternative manifests.
 
-The app deliberately preserves `ddl-auto: update` for learning. For production, use reviewed Flyway/Liquibase migrations, narrower runtime database permissions, authenticated HTTPS API access, managed secret rotation, tested restores and appropriate availability. One app replica and Single-AZ RDS are learning choices.
+## Costs and cleanup
 
-**Keeping an EKS cluster, EC2 nodes, NAT gateways, EBS or RDS resources can still incur charges even when you are not using the app.** See [the cost and cleanup checklist](docs/COST-AND-CLEANUP.md). IAM roles can be retained, but keeping a cluster is not a zero-cost pause.
+Public NLBs/IPs add charges. EKS, worker nodes, NAT, RDS and storage remain billable while provisioned. Follow [the cleanup checklist](docs/COST-AND-CLEANUP.md). Delete the public Service and confirm its AWS load balancer is removed BEFORE deleting the cluster/controller. Nothing in the test job deletes or provisions a database.

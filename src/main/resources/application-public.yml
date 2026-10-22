@@ -1,0 +1,22 @@
+# Activate together with rds. TLS terminates at Spring Boot; NLB forwards TCP.
+server:
+  port: 8443
+  ssl:
+    enabled: true
+    key-store: file:/app/tls/server.p12
+    key-store-type: PKCS12
+    key-store-password: ${TLS_KEYSTORE_PASSWORD}
+    key-alias: app
+  servlet:
+    session:
+      timeout: 15m
+      cookie:
+        secure: true
+        http-only: true
+        same-site: lax
+management:
+  server:
+    port: 8081
+    address: 0.0.0.0
+    ssl:
+      enabled: false

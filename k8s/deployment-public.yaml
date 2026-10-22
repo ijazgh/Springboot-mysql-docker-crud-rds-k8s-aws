@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springboot-rds-crud
+  namespace: default
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: springboot-rds-crud
+  template:
+    metadata:
+      labels:
+        app: springboot-rds-crud
+        public-access: tls
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 10001
+      containers:
+      - name: app
+        image: REPLACED_BY_WORKFLOW
+        ports:
+        - name: https
+          containerPort: 8443
+        - name: management
+          containerPort: 8081
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: rds,public
+        - name: TLS_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rds-crud-tls
+              key: TLS_KEYSTORE_PASSWORD
+        envFrom:
+        - configMapRef:
+            name: rds-crud-config
+        - secretRef:
+            name: rds-crud-db
+        - secretRef:
+            name: rds-crud-login
+        resources:
+          requests:
+            cpu: 100m
+            memory: 384Mi
+          limits:
+            cpu: '1'
+            memory: 768Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        startupProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8081
+          periodSeconds: 10
+          failureThreshold: 30
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8081
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8081
+          periodSeconds: 20
+        volumeMounts:
+        - name: tls
+          mountPath: /app/tls
+          readOnly: true
+      volumes:
+      - name: tls
+        secret:
+          secretName: rds-crud-tls
+          defaultMode: 288
+          items:
+          - key: server.p12
+            path: server.p12
